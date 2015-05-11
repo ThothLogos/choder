@@ -9,15 +9,20 @@ class Server
 
   def initialize(address, port)
     @server = TCPServer.open(address, port)
-    @connections = {}
-    @rooms = {}
-    @clients = {}
+    @connections = Hash.new
+    @rooms = Hash.new
+    @clients = Hash.new
+    @connections[:server] = @server
+    @connections[:rooms] = @rooms
+    @connections[:clients] = @clients
+    run
   end
 
   def run
+    puts "Server listening."
     loop do
-      Thread.start do |client|
-        
+      Thread.start(@server.accept) do |client|
+        puts "New thread started, client ID: #{client}"
         # The first input coming from the client will be the username
         username = client.gets.chomp.to_sym
         
@@ -35,6 +40,21 @@ class Server
 
         # Server side log
         puts "#{username} connected, client ID: #{client}"
+
+        # Begin listening to connected client
+        listen(username, client)
+      end
+    end.join
+  end
+
+  def listen(localuser, client)
+    puts "Listening to #{localuser} #{client}"
+    loop do
+      
+      message = client.gets.chomp
+      @connections[:clients].each do |user, client|
+        if user != localuser
+          client.puts "#{localuser.to_s}: #{message}"; end 
       end
     end
   end
@@ -42,4 +62,3 @@ class Server
 end
 
 server = Server.new("localhost", 7680)
-server.run
