@@ -19,7 +19,7 @@ class Server
   end
 
   def run
-    puts "Server listening."
+    puts "Server ready."
     loop do
       Thread.start(@server.accept) do |client|
         puts "New thread started, client ID: #{client}"
@@ -36,10 +36,7 @@ class Server
         
         # Else, successful login, add user to client table
         @connections[:clients][username] = client
-        client.puts "Connection established."
-
-        # Server side log
-        puts "#{username} connected, client ID: #{client}"
+        client.puts "Connection established, logged in as #{username}."
 
         # Begin listening to connected client
         listen(username, client)
@@ -50,9 +47,9 @@ class Server
   def listen(localuser, client)
     puts "Listening to #{localuser} #{client}"
     loop do
-      
       message = client.gets.chomp
       @connections[:clients].each do |user, client|
+        # Broadcast message to everyone except the origin
         if user != localuser
           client.puts "#{localuser.to_s}: #{message}"; end 
       end
