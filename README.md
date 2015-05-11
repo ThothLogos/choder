@@ -7,6 +7,6 @@ single, focused environment to take care of my needs that is not bound to the
 browser. Privacy concerns and a few workflow convenience pet-peeves will hopefully
 culminate in a handy collaboration platform for developers and designers.
 
-This is an early work in progress.
+This is an early work in progress. The name is a placeholder that made me chuckle.
 
 
