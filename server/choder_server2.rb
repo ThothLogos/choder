@@ -49,11 +49,11 @@ module Choder
         # Parse first 4 characters for protocol function
         cmd = request[0..3].strip.upcase
         # Remaining data is request arguments
-        options = request[4..-1].strip
+        args = request[4..-1].strip
 
         case cmd
         when 'USER' # Incoming username information for login
-          return "You are now logged in."
+          return "You are logged in as #{args}."
         when 'INFO' # Server identifcation
           return "Choder React Server 0.1a"
         when 'WHO'  # List all users online
@@ -64,7 +64,7 @@ module Choder
           return "Not yet implemented."
         when 'PORT' # Establish a dynamic range data port
           # Strip values between commas
-          pieces = options.split(',')
+          pieces = args.split(',')
           # Rebuild as an IPv4 address
           address = pieces[0..3].join('.')
           # Assemble a dynamic port
@@ -77,9 +77,10 @@ module Choder
           file_list = Dir.entries(Dir.pwd).join(CRLF)
           @data_socket.write(file_list)
           @data_socket.close
+          return "End file list."
         when 'FILE' # Request file from server
           # Incoming function arguments should contain filename
-          file = File.open(File.join(Dir.pwd, options), 'r')
+          file = File.open(File.join(Dir.pwd, args), 'r')
           connection.respond "Opening data stream, sending #{file.size} bytes."
           bytes = IO.copy_stream(file, @data_socket)
           @data_socket.close
@@ -95,8 +96,8 @@ module Choder
     class Connection
       attr_reader :client
       
-      def initialize(io)
-        @client = io
+      def initialize(client)
+        @client = client
         @request, @response = "", ""
         @handler = EventHandler.new(self)
 
@@ -106,50 +107,57 @@ module Choder
 
       def on_data(data)
         @request << data
-
+        # Is the incoming data a complete request?
         if @request.end_with?(CRLF)
+          # Handle the request and package a response
           @response = @handler.handle(@request) + CRLF
-          @request = ""
+          @request = "" # Clear the request
         end
       end
 
       def on_writable
         bytes = client.write_nonblock(@response)
+        # If partial write, remove the portion that was already transmitted
         @response.slice!(0, bytes)
       end
 
       def monitor_for_reading?
-        true
+        true # Always listen
       end
 
       def monitor_for_writing?
-        !(@response.empty?)
+        !(@response.empty?) # Only prep for writing if there's a response ready
       end
-
     end # Connection
 
     def run
       @handles = Hash.new
 
       loop do
+        # Check each active client connection for available read/write traffic
         to_read = @handles.values.select(&:monitor_for_reading?).map(&:client)
         to_write = @handles.values.select(&:monitor_for_writing?).map(&:client)
 
+        # Locate the IO object for each connection with a read/write ready, also
+        # monitor @control_socket for new incoming clients
         readables, writables = IO.select(to_read + [@control_socket], to_write)
 
+        # For each socket ready to be read
         readables.each do |socket|
+          # If the @control_socket is readable, it means there's a new client
           if socket == @control_socket
-            io = @control_socket.accept
-            connection = Connection.new(io)
-            @handles[io.fileno] = connection
-          else
-            connection = @handles[socket.fileno]
-            begin
+            # Accept the new client and build a new Connection for it
+            client = @control_socket.accept
+            connection = Connection.new(client)
+            @handles[client.fileno] = connection # Add connection to client table
+          else # Ordinary data request from existing client
+            connection = @handles[socket.fileno] # Locate the client's connection
+            begin # Read sequence
               data = socket.read_nonblock(MAX_READ_SIZE)
               connection.on_data(data)
             rescue Errno::EAGAIN
-            rescue EOFError
-              @handles.delete(socket.fileno)
+            rescue EOFError # Client dropped connection
+              @handles.delete(socket.fileno) # Remove from active client table
             end
           end
         end
@@ -159,9 +167,8 @@ module Choder
           connection.on_writable
         end
 
-      end
+      end # loop
     end # run()
-
   end # Server
 end # Choder
 
