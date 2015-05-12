@@ -6,6 +6,8 @@
 
 require 'socket'
 
+max_read_size = 32  # bytes
+
 # Sets up both ipv4 and ipv6 bindings
 Socket.tcp_server_loop(7680) do |conn|
   
@@ -18,11 +20,12 @@ Socket.tcp_server_loop(7680) do |conn|
     conn.close
   end
 
-  # Continually return stream data in 1kB chunks, without a read length
-  # the server would only return the read when an EOF was reached.
-  while data = conn.read(1024) do
-    puts data
+  # Continually return stream data in partial reads up to a maximum chunk size
+  begin
+    while data = conn.readpartial(max_read_size) do
+      puts data
+    end
+  rescue EOFError # readpartial will produce an exception upon an EOF
   end
-  
   conn.close
 end
