@@ -6,11 +6,10 @@
 
 require 'socket'
 
+CRLF = "\r\n"
+
 # Open TCP connection, grab the connection
 Socket.tcp('localhost', 7680) do |connection|
-  
-  # Send client version to server
-  connection.write "choder_test2\n"
   
   running = true
 
@@ -21,10 +20,10 @@ Socket.tcp('localhost', 7680) do |connection|
     if input == "x" || input == "q"
       running = false
     else
+      input += CRLF
       connection.write input
     end    
   end
 
   connection.close
 end
-
