@@ -11,13 +11,14 @@
 
 require 'socket'
 
-module Choder
+module ChoderServer
+
+  CRLF = "\r\n"
 
   class Server
 
     # Maximum chunk size, in bytes, before the server will force a return
     MAX_READ_SIZE = 1024 * 4
-    CRLF = "\r\n"
 
     # One instance of the server operates on a control port, specific
     # data instances between client/server will be handled on the fly
@@ -95,110 +96,112 @@ module Choder
       @@clients.delete(socket.fileno)
       puts "Client #{socket.fileno} #{socket} removed from active connections."
     end
-
-    # Each incoming client connection will be encapsulated into its own object
-    class Connection
-      attr_reader :client
-      
-      def initialize(client)
-        @client = client
-        @request, @response = "", ""
-        # Each connection has its own instance of the EventHandler
-        @handler = EventHandler.new(self)
-        @response =  "Connection to Choder esablished." + CRLF
-        on_writable
-      end
-
-      def on_data(data)
-        @request << data
-        # Is the incoming data a complete request?
-        if @request.end_with?(CRLF)
-          # Handle the request and package a response
-          @response = @handler.handle(@request) + CRLF
-          @request = "" # Clear the request
-        end
-      end
-
-      def on_writable
-        bytes = client.write_nonblock(@response)
-        # If partial write, remove the portion that was already transmitted
-        @response.slice!(0, bytes)
-      end
-
-      def monitor_for_reading?
-        true # Always listen
-      end
-
-      def monitor_for_writing?
-        !(@response.empty?) # Only prep for writing if there's a response ready
-      end
-
-    end # Connection
-
-    # Each connection will have its own EventHandler instance
-    class EventHandler < Server
-      attr_reader :connection
-
-      def initialize(connection)
-        @connection = connection
-      end
-
-      # The primary method for handling an incoming request
-      def handle(request)
-        # Parse first 4 characters for protocol function
-        cmd = request[0..3].strip.upcase
-        # Remaining data is request arguments
-        args = request[4..-1].strip
-
-        case cmd
-        when 'USER' # Incoming username information for login
-          return "You are logged in as #{args}."
-        when 'INFO' # Server identifcation
-          return "Choder React Server 0.1a"
-        when 'WHO'  # List all users online
-          puts clients
-          return clients.to_s
-        when 'FIND' # Check if user is online
-          return "Not yet implemented."
-        when 'MSG'  # Send message to user
-          return "Not yet implemented."
-        when 'ECHO' # Send message to server
-          puts args
-          return "Echo: #{args}"
-        when 'PORT' # Establish a dynamic range data port
-          # Strip values between commas
-          pieces = args.split(',')
-          # Rebuild as an IPv4 address
-          address = pieces[0..3].join('.')
-          # Assemble a dynamic port
-          port = Integer(pieces[4]) * 256 + Integer(pieces[5])
-          # Bind a new socket to this port
-          @data_socket = TCPSocket.new(address, port)
-          return "Data connection established on port #{port}."
-        when 'LIST' # List available files on server
-          connection.respond "Available files on this server: "
-          file_list = Dir.entries(Dir.pwd).join(CRLF)
-          @data_socket.write(file_list)
-          @data_socket.close
-          return "End file list."
-        when 'FILE' # Request file from server
-          # Incoming function arguments should contain filename
-          file = File.open(File.join(Dir.pwd, args), 'r')
-          connection.respond "Opening data stream, sending #{file.size} bytes."
-          bytes = IO.copy_stream(file, @data_socket)
-          @data_socket.close
-          return "Closing data stream, sent #{bytes} bytes."
-        else
-          return "Unrecognized command: #{cmd}."
-        end # case
-      end # handle()
-
-
-    end # EventHandler
   end # Server
-end # Choder
+
+
+  # Each incoming client connection will be encapsulated into its own object
+  class Connection
+    attr_reader :client
+    
+    def initialize(client)
+      @client = client
+      @request, @response = "", ""
+      # Each connection has its own instance of the EventHandler
+      @handler = EventHandler.new(self)
+      @response =  "Connection to Choder esablished." + CRLF
+      on_writable
+    end
+
+    def on_data(data)
+      @request << data
+      # Is the incoming data a complete request?
+      if @request.end_with?(CRLF)
+        # Handle the request and package a response
+        @response = @handler.handle(@request) + CRLF
+      else
+        puts "Invalid request from client."
+      end
+      @request = "" # Clear the request
+    end
+
+    def on_writable
+      bytes = client.write_nonblock(@response)
+      # If partial write, remove the portion that was already transmitted
+      @response.slice!(0, bytes)
+    end
+
+    def monitor_for_reading?
+      true # Always listen
+    end
+
+    def monitor_for_writing?
+      !(@response.empty?) # Only prep for writing if there's a response ready
+    end
+  end # Connection
+
+  
+  # Each connection will have its own EventHandler instance
+  class EventHandler < Server
+    attr_reader :connection
+
+    def initialize(connection)
+      @connection = connection
+    end
+
+    # The primary method for handling an incoming request
+    def handle(request)
+      # Parse first 4 characters for protocol function
+      cmd = request[0..3].strip.upcase
+      # Remaining data is request arguments
+      args = request[4..-1].strip
+
+      case cmd
+      when 'USER' # Incoming username information for login
+        return "You are logged in as #{args}."
+      when 'INFO' # Server identifcation
+        return "Choder React Server 0.1a"
+      when 'WHO'  # List all users online
+        puts clients
+        return clients.to_s
+      when 'FIND' # Check if user is online
+        return "Not yet implemented."
+      when 'MSG'  # Send message to user
+        return "Not yet implemented."
+      when 'ECHO' # Send message to server
+        puts args
+        return "Echo: #{args}"
+      when 'PORT' # Establish a dynamic range data port
+        # Strip values between commas
+        pieces = args.split(',')
+        # Rebuild as an IPv4 address
+        address = pieces[0..3].join('.')
+        # Assemble a dynamic port
+        port = Integer(pieces[4]) * 256 + Integer(pieces[5])
+        # Bind a new socket to this port
+        @data_socket = TCPSocket.new(address, port)
+        return "Data connection established on port #{port}."
+      when 'LIST' # List available files on server
+        connection.respond "Available files on this server: "
+        file_list = Dir.entries(Dir.pwd).join(CRLF)
+        @data_socket.write(file_list)
+        @data_socket.close
+        return "End file list."
+      when 'FILE' # Request file from server
+        # Incoming function arguments should contain filename
+        file = File.open(File.join(Dir.pwd, args), 'r')
+        connection.respond "Opening data stream, sending #{file.size} bytes."
+        bytes = IO.copy_stream(file, @data_socket)
+        @data_socket.close
+        return "Closing data stream, sent #{bytes} bytes."
+      else
+        return "Unrecognized command: #{cmd}."
+      end # case
+    end # handle()
+  end # EventHandler
+
+end # ChoderServer
 
 
 # Start server
-server = Choder::Server.new(7680)
+server = ChoderServer::Server.new(7680)
 server.run
