@@ -6,24 +6,34 @@
 
 require 'socket'
 
-CRLF = "\r\n"
+module ChoderClient
 
-# Open TCP connection, grab the connection
-Socket.tcp('localhost', 7680) do |connection|
-  
-  running = true
+  CRLF = "\r\n"
 
-  while running
-    puts "Enter message to server (x or q to exit): "
-    input = gets.chomp
+  class Client
 
-    if input == "x" || input == "q"
-      running = false
-    else
-      input += CRLF
-      connection.write input
-    end    
-  end
+    def initialize(address = "localhost", port = "7680")
+      @connection = Socket.tcp(address, port)
+    end
 
-  connection.close
-end
+    def run
+      running = true
+      while running
+        puts "Enter message to server (x or q to exit): "
+        input = gets.chomp
+        if input == "x" || input == "q"
+          running = false
+        elsif !input.empty?
+          input += CRLF
+          @connection.write input
+        end  
+      end
+      @connection.close
+    end # run()
+
+  end #Client
+
+end # ChoderClient
+
+client = ChoderClient::Client.new()
+client.run
