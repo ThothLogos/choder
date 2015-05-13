@@ -18,7 +18,7 @@ module Choder
     # Maximum chunk size, in bytes, before the server will force a return
     MAX_READ_SIZE = 1024 * 4
     CRLF = "\r\n"
-    
+
     # One instance of the server operates on a control port, specific
     # data instances between client/server will be handled on the fly
     # through an event system and separate dynamic ports
@@ -29,37 +29,41 @@ module Choder
         puts "\nExiting..."
         exit 130
       end
+      # Key/value table to hold client connection IDs and the connection itself
+      @@clients = Hash.new
       puts "Choder server established on port #{port}."
     end
 
     # Primary program process containing the server's listening loop
     def run
-      # Key/value table to hold client connection IDs and the connection itself
-      @clients = Hash.new
-
+      iteration = 0
       loop do
+        iteration += 1
+        print "\n-= Iteration: #{iteration}\n"
         # Check each active client connection for available read/write traffic
-        to_read = @clients.values.select(&:monitor_for_reading?).map(&:client)
-        to_write = @clients.values.select(&:monitor_for_writing?).map(&:client)
-
-        # Locate the IO object (below the socket) for each connection and check for
-        # read/write readiness, monitor @control_socket for new incoming clients
+        to_read = @@clients.values.select(&:monitor_for_reading?).map(&:client)
+        to_write = @@clients.values.select(&:monitor_for_writing?).map(&:client)
+        puts "Reads: " + to_read.to_s unless to_read == nil
+        puts "Writes: " + to_write.to_s unless to_write == nil
+        # Locate the IO object for each connection and check for read/write
+        # readiness, monitor @control_socket for new incoming clients
         readables, writables = IO.select(to_read + [@control_socket], to_write)
-
+        puts "Readables: " + readables.to_s
+        puts "Writables: " + writables.to_s
         # For each socket ready to be read
         readables.each do |socket|
           # If @control_socket shows up as readable, there's a new incoming client
           if socket == @control_socket
-            puts "New incoming client connection #{socket.fileno} at #{socket}."
             # Accept the new client and build a unique Connection object for it
             client = @control_socket.accept
             connection = Connection.new(client)
-            @clients[client.fileno] = connection # Add connection to client table
+            puts "New client connection at #{client.fileno} #{client} #{connection}."
+            @@clients[client.fileno] = connection # Add connection to client table
           else # Ordinary data request from existing client
-            connection = @clients[socket.fileno] # Locate the client's connection
+            connection = @@clients[socket.fileno] # Locate the client's connection
             begin # Read sequence
               data = socket.read_nonblock(MAX_READ_SIZE)
-              puts "Client #{socket.fileno} request: #{data.to_s}"
+              puts "Client #{connection} request: #{data.to_s}"
               connection.on_data(data)
             rescue Errno::EAGAIN
             rescue EOFError # Client dropped connection
@@ -71,12 +75,16 @@ module Choder
         end # readables
 
         writables.each do |socket|
-          connection = @clients[socket.fileno]
+          connection = @@clients[socket.fileno]
           connection.on_writable
         end
 
       end # loop
     end # run()
+
+    def clients
+      @@clients
+    end
 
     def respond(response)
       @client.write(response)
@@ -84,7 +92,7 @@ module Choder
     end
 
     def drop_client(socket)
-      @clients.delete(socket.fileno)
+      @@clients.delete(socket.fileno)
       puts "Client #{socket.fileno} #{socket} removed from active connections."
     end
 
@@ -124,10 +132,11 @@ module Choder
       def monitor_for_writing?
         !(@response.empty?) # Only prep for writing if there's a response ready
       end
+
     end # Connection
 
     # Each connection will have its own EventHandler instance
-    class EventHandler
+    class EventHandler < Server
       attr_reader :connection
 
       def initialize(connection)
@@ -147,10 +156,8 @@ module Choder
         when 'INFO' # Server identifcation
           return "Choder React Server 0.1a"
         when 'WHO'  # List all users online
-          @clients.each do |client|
-            puts client
-          end
-          return "Not yet implemented"
+          puts clients
+          return clients.to_s
         when 'FIND' # Check if user is online
           return "Not yet implemented."
         when 'MSG'  # Send message to user
