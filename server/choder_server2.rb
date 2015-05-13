@@ -26,71 +26,67 @@ module Choder
       @control_socket = TCPServer.new(port)
       # What to do upon Ctrl-C
       trap(:INT) do
-        puts "Exiting..."
+        puts "\nExiting..."
         exit 130
       end
+      puts "Choder server established on port #{port}."
     end
+
+    # Primary program process containing the server's listening loop
+    def run
+      # Key/value table to hold client connection IDs and the connection itself
+      @clients = Hash.new
+
+      loop do
+        # Check each active client connection for available read/write traffic
+        to_read = @clients.values.select(&:monitor_for_reading?).map(&:client)
+        to_write = @clients.values.select(&:monitor_for_writing?).map(&:client)
+
+        # Locate the IO object (below the socket) for each connection and check for
+        # read/write readiness, monitor @control_socket for new incoming clients
+        readables, writables = IO.select(to_read + [@control_socket], to_write)
+
+        # For each socket ready to be read
+        readables.each do |socket|
+          # If @control_socket shows up as readable, there's a new incoming client
+          if socket == @control_socket
+            puts "New incoming client connection #{socket.fileno} at #{socket}."
+            # Accept the new client and build a unique Connection object for it
+            client = @control_socket.accept
+            connection = Connection.new(client)
+            @clients[client.fileno] = connection # Add connection to client table
+          else # Ordinary data request from existing client
+            connection = @clients[socket.fileno] # Locate the client's connection
+            begin # Read sequence
+              data = socket.read_nonblock(MAX_READ_SIZE)
+              puts "Client #{socket.fileno} request: #{data.to_s}"
+              connection.on_data(data)
+            rescue Errno::EAGAIN
+            rescue EOFError # Client dropped connection
+              drop_client(socket) # Remove from active client table
+            rescue Errno::ECONNRESET # Client closed connection
+              drop_client(socket)
+            end
+          end
+        end # readables
+
+        writables.each do |socket|
+          connection = @clients[socket.fileno]
+          connection.on_writable
+        end
+
+      end # loop
+    end # run()
 
     def respond(response)
       @client.write(response)
       @client.write(CRLF)
     end
 
-    # Each connection will have its own EventHandler instance
-    class EventHandler
-      attr_reader :connection
-
-      def initialize(connection)
-        @connection = connection
-      end
-
-      # The primary method for handling an incoming request
-      def handle(request)
-        # Parse first 4 characters for protocol function
-        cmd = request[0..3].strip.upcase
-        # Remaining data is request arguments
-        args = request[4..-1].strip
-
-        case cmd
-        when 'USER' # Incoming username information for login
-          return "You are logged in as #{args}."
-        when 'INFO' # Server identifcation
-          return "Choder React Server 0.1a"
-        when 'WHO'  # List all users online
-          return "Not yet implemented"
-        when 'FIND' # Check if user is online
-          return "Not yet implemented."
-        when 'MSG'  # Send message to user
-          return "Not yet implemented."
-        when 'PORT' # Establish a dynamic range data port
-          # Strip values between commas
-          pieces = args.split(',')
-          # Rebuild as an IPv4 address
-          address = pieces[0..3].join('.')
-          # Assemble a dynamic port
-          port = Integer(pieces[4]) * 256 + Integer(pieces[5])
-          # Bind a new socket to this port
-          @data_socket = TCPSocket.new(address, port)
-          return "Data connection established on port #{port}."
-        when 'LIST' # List available files on server
-          connection.respond "Available files on this server: "
-          file_list = Dir.entries(Dir.pwd).join(CRLF)
-          @data_socket.write(file_list)
-          @data_socket.close
-          return "End file list."
-        when 'FILE' # Request file from server
-          # Incoming function arguments should contain filename
-          file = File.open(File.join(Dir.pwd, args), 'r')
-          connection.respond "Opening data stream, sending #{file.size} bytes."
-          bytes = IO.copy_stream(file, @data_socket)
-          @data_socket.close
-          return "Closing data stream, sent #{bytes} bytes."
-        else
-          return "Unrecognized command: #{cmd}."
-        end # case
-      end # handle()
-    end # EventHandler
-
+    def drop_client(socket)
+      @clients.delete(socket.fileno)
+      puts "Client #{socket.fileno} #{socket} removed from active connections."
+    end
 
     # Each incoming client connection will be encapsulated into its own object
     class Connection
@@ -99,8 +95,8 @@ module Choder
       def initialize(client)
         @client = client
         @request, @response = "", ""
+        # Each connection has its own instance of the EventHandler
         @handler = EventHandler.new(self)
-
         @response =  "Connection to Choder esablished." + CRLF
         on_writable
       end
@@ -130,47 +126,72 @@ module Choder
       end
     end # Connection
 
-    def run
-      @handles = Hash.new
+    # Each connection will have its own EventHandler instance
+    class EventHandler
+      attr_reader :connection
 
-      loop do
-        # Check each active client connection for available read/write traffic
-        to_read = @handles.values.select(&:monitor_for_reading?).map(&:client)
-        to_write = @handles.values.select(&:monitor_for_writing?).map(&:client)
+      def initialize(connection)
+        @connection = connection
+      end
 
-        # Locate the IO object for each connection with a read/write ready, also
-        # monitor @control_socket for new incoming clients
-        readables, writables = IO.select(to_read + [@control_socket], to_write)
+      # The primary method for handling an incoming request
+      def handle(request)
+        # Parse first 4 characters for protocol function
+        cmd = request[0..3].strip.upcase
+        # Remaining data is request arguments
+        args = request[4..-1].strip
 
-        # For each socket ready to be read
-        readables.each do |socket|
-          # If the @control_socket is readable, it means there's a new client
-          if socket == @control_socket
-            # Accept the new client and build a new Connection for it
-            client = @control_socket.accept
-            connection = Connection.new(client)
-            @handles[client.fileno] = connection # Add connection to client table
-          else # Ordinary data request from existing client
-            connection = @handles[socket.fileno] # Locate the client's connection
-            begin # Read sequence
-              data = socket.read_nonblock(MAX_READ_SIZE)
-              connection.on_data(data)
-            rescue Errno::EAGAIN
-            rescue EOFError # Client dropped connection
-              @handles.delete(socket.fileno) # Remove from active client table
-            end
+        case cmd
+        when 'USER' # Incoming username information for login
+          return "You are logged in as #{args}."
+        when 'INFO' # Server identifcation
+          return "Choder React Server 0.1a"
+        when 'WHO'  # List all users online
+          @clients.each do |client|
+            puts client
           end
-        end
+          return "Not yet implemented"
+        when 'FIND' # Check if user is online
+          return "Not yet implemented."
+        when 'MSG'  # Send message to user
+          return "Not yet implemented."
+        when 'ECHO' # Send message to server
+          puts args
+          return "Echo: #{args}"
+        when 'PORT' # Establish a dynamic range data port
+          # Strip values between commas
+          pieces = args.split(',')
+          # Rebuild as an IPv4 address
+          address = pieces[0..3].join('.')
+          # Assemble a dynamic port
+          port = Integer(pieces[4]) * 256 + Integer(pieces[5])
+          # Bind a new socket to this port
+          @data_socket = TCPSocket.new(address, port)
+          return "Data connection established on port #{port}."
+        when 'LIST' # List available files on server
+          connection.respond "Available files on this server: "
+          file_list = Dir.entries(Dir.pwd).join(CRLF)
+          @data_socket.write(file_list)
+          @data_socket.close
+          return "End file list."
+        when 'FILE' # Request file from server
+          # Incoming function arguments should contain filename
+          file = File.open(File.join(Dir.pwd, args), 'r')
+          connection.respond "Opening data stream, sending #{file.size} bytes."
+          bytes = IO.copy_stream(file, @data_socket)
+          @data_socket.close
+          return "Closing data stream, sent #{bytes} bytes."
+        else
+          return "Unrecognized command: #{cmd}."
+        end # case
+      end # handle()
 
-        writables.each do |socket|
-          connection = @handles[socket.filno]
-          connection.on_writable
-        end
 
-      end # loop
-    end # run()
+    end # EventHandler
   end # Server
 end # Choder
 
+
+# Start server
 server = Choder::Server.new(7680)
 server.run
