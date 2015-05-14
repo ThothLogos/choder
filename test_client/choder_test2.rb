@@ -2,7 +2,7 @@
 #
 # 20150512 - ThothLogos
 #
-# Test client for second attempt at TCP platform.
+# Test client for TCP server.
 
 require 'socket'
 
@@ -14,6 +14,9 @@ module ChoderClient
 
     def initialize(address = "localhost", port = "7680")
       @connection = Socket.tcp(address, port)
+      trap(:TSTP) { exit 130 }
+      trap(:INT) { exit 130 }
+      trap(:TERM) { exit 130 }
     end
 
     def run
