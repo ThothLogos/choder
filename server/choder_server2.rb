@@ -2,12 +2,9 @@
 #
 # 20150512 - ThothLogos
 #
-# Second stab at TCP server for Choder platform.
-#
 # This implementation is a single-threaded event-based server. Concurrency
 # is handled with an object for each connection rather than a thread or process.
-#
-# For simplicity/immediacy, initial API commands copied from FTP.
+
 
 require 'socket'
 
@@ -17,12 +14,10 @@ module ChoderServer
 
   class Server
 
-    # Maximum chunk size, in bytes, before the server will force a return
+    # Maximum chunk size in bytes before the server will force a return
     MAX_READ_SIZE = 1024 * 4
 
-    # One instance of the server operates on a control port, specific
-    # data instances between client/server will be handled on the fly
-    # through an event system and separate dynamic ports
+    # One instance of the server listens for client request on a @control_socket
     def initialize(port)
       @control_socket = TCPServer.new(port)
       # What to do upon Ctrl-C
@@ -30,27 +25,39 @@ module ChoderServer
         puts "\nExiting..."
         exit 130
       end
-      # Key/value table to hold client connection IDs and the connection itself
       @@clients = Hash.new
       puts "Choder server established on port #{port}."
     end
 
-    # Primary program process containing the server's listening loop
+    # Start listen/read/write loop
     def run
       iteration = 0
       loop do
+        
+        ##~ ~ ~ Debug ~ ~ ~##
         iteration += 1
         print "\n-= Iteration: #{iteration}\n"
-        # Check each active client connection for available read/write traffic
-        to_read = @@clients.values.select(&:monitor_for_reading?).map(&:client)
-        to_write = @@clients.values.select(&:monitor_for_writing?).map(&:client)
-        puts "Reads: " + to_read.to_s unless to_read == nil
-        puts "Writes: " + to_write.to_s unless to_write == nil
+
+        # Every connection
+        to_read = @@clients.values.select(&:read_ready?).map(&:client)
+        to_write = @@clients.values.select(&:write_ready?).map(&:client)
+        
+        ##~ ~ ~ Debug ~ ~ ~##
+        puts "Reads: " + to_read.to_s
+        puts "Writes: " + to_write.to_s
+
         # Locate the IO object for each connection and check for read/write
         # readiness, monitor @control_socket for new incoming clients
         readables, writables = IO.select(to_read + [@control_socket], to_write)
+        
+        ##~ ~ ~ Debug ~ ~ ~##
         puts "Readables: " + readables.to_s
-        puts "Writables: " + writables.to_s
+        puts "Writables: "
+        writables.each do |s|
+          c = @@clients.key(@@clients[s.fileno]) 
+          puts "Return to client #{c} => " + @@clients[s.fileno].response.to_s
+        end
+
         # For each socket ready to be read
         readables.each do |socket|
           # If @control_socket shows up as readable, there's a new incoming client
@@ -102,6 +109,7 @@ module ChoderServer
   # Each incoming client connection will be encapsulated into its own object
   class Connection
     attr_reader :client
+    attr_reader :response
     
     def initialize(client)
       @client = client
@@ -130,11 +138,11 @@ module ChoderServer
       @response.slice!(0, bytes)
     end
 
-    def monitor_for_reading?
+    def read_ready?
       true # Always listen
     end
 
-    def monitor_for_writing?
+    def write_ready?
       !(@response.empty?) # Only prep for writing if there's a response ready
     end
   end # Connection
@@ -169,7 +177,7 @@ module ChoderServer
         return "Not yet implemented."
       when 'ECHO' # Send message to server
         puts args
-        return "Echo: #{args}"
+        return "Server received: #{cmd} #{args}"
       when 'PORT' # Establish a dynamic range data port
         # Strip values between commas
         pieces = args.split(',')
