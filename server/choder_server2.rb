@@ -177,15 +177,11 @@ module ChoderServer
         return "Not yet implemented."
       when 'ECHO' # Send message to server
         puts args
-        return "Server received: #{cmd} #{args}"
+        return "Server echo'd: #{args}"
       when 'PORT' # Establish a dynamic range data port
-        # Strip values between commas
         pieces = args.split(',')
-        # Rebuild as an IPv4 address
         address = pieces[0..3].join('.')
-        # Assemble a dynamic port
         port = Integer(pieces[4]) * 256 + Integer(pieces[5])
-        # Bind a new socket to this port
         @data_socket = TCPSocket.new(address, port)
         return "Data connection established on port #{port}."
       when 'LIST' # List available files on server
@@ -195,12 +191,15 @@ module ChoderServer
         @data_socket.close
         return "End file list."
       when 'FILE' # Request file from server
-        # Incoming function arguments should contain filename
-        file = File.open(File.join(Dir.pwd, args), 'r')
-        connection.respond "Opening data stream, sending #{file.size} bytes."
-        bytes = IO.copy_stream(file, @data_socket)
-        @data_socket.close
-        return "Closing data stream, sent #{bytes} bytes."
+        if File.exist?(Dir.pwd + args)
+          file = File.open(File.join(Dir.pwd, args), 'r')
+          connection.respond "Opening data stream, sending #{file.size} bytes."
+          bytes = IO.copy_stream(file, @data_socket)
+          @data_socket.close
+          return "Closing data stream, sent #{bytes} bytes."
+        else
+          return "Unable to locate requested file: #{args}"
+        end
       else
         return "Unrecognized command: #{cmd}."
       end # case
