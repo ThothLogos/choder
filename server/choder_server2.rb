@@ -31,7 +31,10 @@ module ChoderServer
 
     # Start listen/read/write loop
     def run
+      
+      ##~ ~ ~ Debug ~ ~ ~##
       iteration = 0
+      
       loop do
         
         ##~ ~ ~ Debug ~ ~ ~##
@@ -66,6 +69,7 @@ module ChoderServer
             client = @control_socket.accept
             connection = Connection.new(client)
             puts "New client connection at #{client.fileno} #{client} #{connection}."
+            connection.respond("Connected to Choder server.")
             @@clients[client.fileno] = connection # Add connection to client table
           else # Ordinary data request from existing client
             connection = @@clients[socket.fileno] # Locate the client's connection
@@ -107,7 +111,7 @@ module ChoderServer
 
 
   # Each incoming client connection will be encapsulated into its own object
-  class Connection
+  class Connection < Server
     attr_reader :client
     attr_reader :response
     
@@ -191,7 +195,7 @@ module ChoderServer
         @data_socket.close
         return "End file list."
       when 'FILE' # Request file from server
-        if File.exist?(Dir.pwd + args)
+        if File.file?(Dir.pwd + args) # Check if the target exists and is a file
           file = File.open(File.join(Dir.pwd, args), 'r')
           connection.respond "Opening data stream, sending #{file.size} bytes."
           bytes = IO.copy_stream(file, @data_socket)
